@@ -103,7 +103,8 @@ resource "yandex_vpc_subnet" "k8s-network-c" {
   zone           = "ru-central1-c"
   network_id     = yandex_vpc_network.k8s-network.id
   v4_cidr_blocks = ["192.168.30.0/24"]
-}```
+}
+```
 
 5. Проверяю команду terraform apply без дополнительных ручных действий.
 
