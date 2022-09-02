@@ -1,4 +1,4 @@
-# Дипломный практикум в Yandex.Cloud
+# Дипломный практикум в Яндекс.Облако
   * [Цели:](#цели)
   * [Этапы выполнения:](#этапы-выполнения)
      * [Создание облачной инфраструктуры](#создание-облачной-инфраструктуры)
@@ -25,113 +25,599 @@
 
 ### Создание облачной инфраструктуры
 
-Для начала необходимо подготовить облачную инфраструктуру в ЯО при помощи [Terraform](https://www.terraform.io/).
-
-Особенности выполнения:
-
-- Бюджет купона ограничен, что следует иметь в виду при проектировании инфраструктуры и использовании ресурсов;
-- Следует использовать последнюю стабильную версию [Terraform](https://www.terraform.io/).
+Подготавливаю облачную инфраструктуру в ЯО при помощи terraform.
 
 Предварительная подготовка к установке и запуску Kubernetes кластера.
 
 1. Создайте сервисный аккаунт, который будет в дальнейшем использоваться Terraform для работы с инфраструктурой с необходимыми и достаточными правами. Не стоит использовать права суперпользователя
-2. Подготовьте [backend](https://www.terraform.io/docs/language/settings/backends/index.html) для Terraform:  
-   а. Рекомендуемый вариант: [Terraform Cloud](https://app.terraform.io/)  
-   б. Альтернативный вариант: S3 bucket в созданном ЯО аккаунте
-3. Настройте [workspaces](https://www.terraform.io/docs/language/state/workspaces.html)  
-   а. Рекомендуемый вариант: создайте два workspace: *stage* и *prod*. В случае выбора этого варианта все последующие шаги должны учитывать факт существования нескольких workspace.  
-   б. Альтернативный вариант: используйте один workspace, назвав его *stage*. Пожалуйста, не используйте workspace, создаваемый Terraform-ом по-умолчанию (*default*).
-4. Создайте VPC с подсетями в разных зонах доступности.
-5. Убедитесь, что теперь вы можете выполнить команды `terraform destroy` и `terraform apply` без дополнительных ручных действий.
-6. В случае использования [Terraform Cloud](https://app.terraform.io/) в качестве [backend](https://www.terraform.io/docs/language/settings/backends/index.html) убедитесь, что применение изменений успешно проходит, используя web-интерфейс Terraform cloud.
+```bash
+yc iam service-account create terraform
+yc iam key create --service-account-name terraform -o terraform.json
+yc config set service-account-key terraform.json
+export TF_VAR_yc_token=$(yc iam create-token)
+SERVICE_ACCOUNT_ID=$(yc iam service-account get --name terraform --format json | jq -r .id)
+FOLDER_ID=$(yc iam service-account get --name terraform --format json | jq -r .folder_id)
+yc resource-manager folder add-access-binding $FOLDER_ID --role editor --subject 
+yc iam service-account add-access-binding $SERVICE_ACCOUNT_ID --role editor 
+serviceAccount:$SERVICE_ACCOUNT_ID
+```
+2. Подготавливаю backend на Terraform Cloud 
+#### backend.tf
+```tf
+# backend.tf
+terraform {
+  backend "s3" {
+    endpoint = "storage.yandexcloud.net"
+    bucket   = "hatskerbucket"
+    key        = "diplom/terraform.tfstate" # path to my tfstate file in the bucket
+    region     = "ru-central1-a"
+    access_key = "YCAJEB55Oj2A066twt-wio17a"
+    secret_key = "YCPXRiRvaB22cF8GN-8YK1aoFQYQ6Y7sJzO0Vha1"
+    skip_region_validation      = true
+    skip_credentials_validation = true
+  }
+}
+```
+```bash
+$ cat ~/.terraformrc
+credentials "app.terraform.io" {
+token = "Place your token here"
+}
+```
+3. Настраиваю workspaces  
+```bash
+$ terraform workspace new stage && terraform workspace new prod
+Created and switched to workspace "stage"!
 
-Ожидаемые результаты:
+You're now on a new, empty workspace. Workspaces isolate their state,
+so if you run "terraform plan" Terraform will not see any existing state
+for this configuration.
+Created and switched to workspace "prod"!
 
-1. Terraform сконфигурирован и создание инфраструктуры посредством Terraform возможно без дополнительных ручных действий.
-2. Полученная конфигурация инфраструктуры является предварительной, поэтому в ходе дальнейшего выполнения задания возможны изменения.
+You're now on a new, empty workspace. Workspaces isolate their state,
+so if you run "terraform plan" Terraform will not see any existing state
+for this configuration.
+$ terraform workspace select stage
+Switched to workspace "stage".
+```
+4. Создаю VPC с подсетями в разных зонах доступности.
+#### networks.tf
+# Create ya.cloud VPC
+resource "yandex_vpc_network" "k8s-network" {
+  name = "yc-net"
+}
+# Create ya.cloud public subnet
+resource "yandex_vpc_subnet" "k8s-network-a" {
+  name           = "public-a"
+  zone           = "ru-central1-a"
+  network_id     = yandex_vpc_network.k8s-network.id
+  v4_cidr_blocks = ["192.168.10.0/24"]
+}
+resource "yandex_vpc_subnet" "k8s-network-b" {
+  name           = "public-b"
+  zone           = "ru-central1-b"
+  network_id     = yandex_vpc_network.k8s-network.id
+  v4_cidr_blocks = ["192.168.20.0/24"]
+}
+resource "yandex_vpc_subnet" "k8s-network-c" {
+  name           = "public-c"
+  zone           = "ru-central1-c"
+  network_id     = yandex_vpc_network.k8s-network.id
+  v4_cidr_blocks = ["192.168.30.0/24"]
+}
+```
+6. Проверяю команду ` `terraform apply` без дополнительных ручных действий.
+```bash
+$ alexp@lair:~/yandex-cloud-terraform$ terraform apply
+yandex_container_registry.diplom: Refreshing state... [id=crp9g918mgr8c4a0geee]
 
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the
+following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # yandex_container_registry_iam_binding.pusher will be created
+  + resource "yandex_container_registry_iam_binding" "pusher" {
+      + id          = (known after apply)
+      + members     = (known after apply)
+      + registry_id = "crp9g918mgr8c4a0geee"
+      + role        = "editor"
+    }
+
+  # yandex_iam_service_account.k8s will be created
+  + resource "yandex_iam_service_account" "k8s" {
+      + created_at = (known after apply)
+      + folder_id  = "b1glh44698ke0dcg2atn"
+      + id         = (known after apply)
+      + name       = "k8s"
+    }
+
+  # yandex_iam_service_account.pusher will be created
+  + resource "yandex_iam_service_account" "pusher" {
+      + created_at = (known after apply)
+      + folder_id  = "b1glh44698ke0dcg2atn"
+      + id         = (known after apply)
+      + name       = "pusher"
+    }
+
+  # yandex_kubernetes_cluster.k8s-yandex will be created
+  + resource "yandex_kubernetes_cluster" "k8s-yandex" {
+      + cluster_ipv4_range       = (known after apply)
+      + cluster_ipv6_range       = (known after apply)
+      + created_at               = (known after apply)
+      + description              = "description"
+      + folder_id                = (known after apply)
+      + health                   = (known after apply)
+      + id                       = (known after apply)
+      + labels                   = {
+          + "my_key"       = "my_value"
+          + "my_other_key" = "my_other_value"
+        }
+      + log_group_id             = (known after apply)
+      + name                     = "k8s-yandex"
+      + network_id               = (known after apply)
+      + network_policy_provider  = "CALICO"
+      + node_ipv4_cidr_mask_size = 24
+      + node_service_account_id  = (known after apply)
+      + release_channel          = "STABLE"
+      + service_account_id       = (known after apply)
+      + service_ipv4_range       = (known after apply)
+      + service_ipv6_range       = (known after apply)
+      + status                   = (known after apply)
+
+      + master {
+          + cluster_ca_certificate = (known after apply)
+          + external_v4_address    = (known after apply)
+          + external_v4_endpoint   = (known after apply)
+          + internal_v4_address    = (known after apply)
+          + internal_v4_endpoint   = (known after apply)
+          + public_ip              = true
+          + version                = "1.21"
+          + version_info           = (known after apply)
+
+          + maintenance_policy {
+              + auto_upgrade = true
+
+              + maintenance_window {
+                  + day        = "friday"
+                  + duration   = "4h30m"
+                  + start_time = "02:00"
+                }
+              + maintenance_window {
+                  + day        = "monday"
+                  + duration   = "3h"
+                  + start_time = "03:00"
+                }
+            }
+
+          + regional {
+              + region = "ru-central1"
+
+              + location {
+                  + subnet_id = (known after apply)
+                  + zone      = "ru-central1-a"
+                }
+              + location {
+                  + subnet_id = (known after apply)
+                  + zone      = "ru-central1-b"
+                }
+              + location {
+                  + subnet_id = (known after apply)
+                  + zone      = "ru-central1-c"
+                }
+            }
+
+          + zonal {
+              + subnet_id = (known after apply)
+              + zone      = (known after apply)
+            }
+        }
+    }
+
+  # yandex_kubernetes_node_group.mynodes will be created
+  + resource "yandex_kubernetes_node_group" "mynodes" {
+      + cluster_id        = (known after apply)
+      + created_at        = (known after apply)
+      + description       = "description"
+      + id                = (known after apply)
+      + instance_group_id = (known after apply)
+      + labels            = {
+          + "key" = "value"
+        }
+      + name              = "mynodes"
+      + status            = (known after apply)
+      + version           = "1.21"
+      + version_info      = (known after apply)
+
+      + allocation_policy {
+          + location {
+              + subnet_id = (known after apply)
+              + zone      = "ru-central1-a"
+            }
+        }
+
+      + deploy_policy {
+          + max_expansion   = (known after apply)
+          + max_unavailable = (known after apply)
+        }
+
+      + instance_template {
+          + metadata                  = (known after apply)
+          + nat                       = (known after apply)
+          + network_acceleration_type = (known after apply)
+          + platform_id               = "standard-v2"
+
+          + boot_disk {
+              + size = 64
+              + type = "network-hdd"
+            }
+
+          + container_runtime {
+              + type = (known after apply)
+            }
+
+          + network_interface {
+              + ipv4       = true
+              + ipv6       = (known after apply)
+              + nat        = true
+              + subnet_ids = (known after apply)
+            }
+
+          + resources {
+              + core_fraction = (known after apply)
+              + cores         = 2
+              + gpus          = 0
+              + memory        = 4
+            }
+
+          + scheduling_policy {
+              + preemptible = false
+            }
+        }
+
+      + maintenance_policy {
+          + auto_repair  = true
+          + auto_upgrade = true
+
+          + maintenance_window {
+              + day        = "friday"
+              + duration   = "4h30m"
+              + start_time = "02:00"
+            }
+          + maintenance_window {
+              + day        = "monday"
+              + duration   = "3h"
+              + start_time = "03:00"
+            }
+        }
+
+      + scale_policy {
+          + auto_scale {
+              + initial = 3
+              + max     = 6
+              + min     = 3
+            }
+        }
+    }
+
+  # yandex_resourcemanager_folder_iam_member.k8s-editor will be created
+  + resource "yandex_resourcemanager_folder_iam_member" "k8s-editor" {
+      + folder_id = "b1glh44698ke0dcg2atn"
+      + id        = (known after apply)
+      + member    = (known after apply)
+      + role      = "editor"
+    }
+
+  # yandex_vpc_network.k8s-network will be created
+  + resource "yandex_vpc_network" "k8s-network" {
+      + created_at                = (known after apply)
+      + default_security_group_id = (known after apply)
+      + folder_id                 = (known after apply)
+      + id                        = (known after apply)
+      + labels                    = (known after apply)
+      + name                      = "yc-net"
+      + subnet_ids                = (known after apply)
+    }
+
+  # yandex_vpc_subnet.k8s-network-a will be created
+  + resource "yandex_vpc_subnet" "k8s-network-a" {
+      + created_at     = (known after apply)
+      + folder_id      = (known after apply)
+      + id             = (known after apply)
+      + labels         = (known after apply)
+      + name           = "public-a"
+      + network_id     = (known after apply)
+      + v4_cidr_blocks = [
+          + "192.168.10.0/24",
+        ]
+      + v6_cidr_blocks = (known after apply)
+      + zone           = "ru-central1-a"
+    }
+
+  # yandex_vpc_subnet.k8s-network-b will be created
+  + resource "yandex_vpc_subnet" "k8s-network-b" {
+      + created_at     = (known after apply)
+      + folder_id      = (known after apply)
+      + id             = (known after apply)
+      + labels         = (known after apply)
+      + name           = "public-b"
+      + network_id     = (known after apply)
+      + v4_cidr_blocks = [
+          + "192.168.20.0/24",
+        ]
+      + v6_cidr_blocks = (known after apply)
+      + zone           = "ru-central1-b"
+    }
+
+  # yandex_vpc_subnet.k8s-network-c will be created
+  + resource "yandex_vpc_subnet" "k8s-network-c" {
+      + created_at     = (known after apply)
+      + folder_id      = (known after apply)
+      + id             = (known after apply)
+      + labels         = (known after apply)
+      + name           = "public-c"
+      + network_id     = (known after apply)
+      + v4_cidr_blocks = [
+          + "192.168.30.0/24",
+        ]
+      + v6_cidr_blocks = (known after apply)
+      + zone           = "ru-central1-c"
+    }
+
+Plan: 10 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + cluster_external_v4_endpoint = (known after apply)
+  + cluster_id                   = (known after apply)
+  + registry_id                  = "crp9g918mgr8c4a0geee"
+  Changes to Outputs:
+  + cluster_external_v4_endpoint = (known after apply)
+  + cluster_id                   = (known after apply)
+  + registry_id                  = "crp9g918mgr8c4a0geee"
+
+Do you want to perform these actions in workspace "stage"?
+  Terraform will perform the actions described above.
+  Only 'yes' will be accepted to approve.
+
+  Enter a value: yes
+```
 ---
 ### Создание Kubernetes кластера
+Cоздаю Kubernetes кластер на базе предварительно созданной инфраструктуры используя Yandex Managed Service for Kubernetes
+#### k8s-cluster.tf
+```resource "yandex_kubernetes_cluster" "k8s-yandex" {
+  name        = "k8s-yandex"
+  description = "description"
 
-На этом этапе необходимо создать [Kubernetes](https://kubernetes.io/ru/docs/concepts/overview/what-is-kubernetes/) кластер на базе предварительно созданной инфраструктуры.   Требуется обеспечить доступ к ресурсам из Интернета.
+  network_id = "${yandex_vpc_network.k8s-network.id}"
 
-Это можно сделать двумя способами:
+  master {
+    regional {
+      region = "ru-central1"
 
-1. Рекомендуемый вариант: самостоятельная установка Kubernetes кластера.  
-   а. При помощи Terraform подготовить как минимум 3 виртуальных машины Compute Cloud для создания Kubernetes-кластера. Тип виртуальной машины следует выбрать самостоятельно с учётом требовании к производительности и стоимости. Если в дальнейшем поймете, что необходимо сменить тип инстанса, используйте Terraform для внесения изменений.  
-   б. Подготовить [ansible](https://www.ansible.com/) конфигурации, можно воспользоваться, например [Kubespray](https://kubernetes.io/docs/setup/production-environment/tools/kubespray/)  
-   в. Задеплоить Kubernetes на подготовленные ранее инстансы, в случае нехватки каких-либо ресурсов вы всегда можете создать их при помощи Terraform.
-2. Альтернативный вариант: воспользуйтесь сервисом [Yandex Managed Service for Kubernetes](https://cloud.yandex.ru/services/managed-kubernetes)  
-  а. С помощью terraform resource для [kubernetes](https://registry.terraform.io/providers/yandex-cloud/yandex/latest/docs/resources/kubernetes_cluster) создать региональный мастер kubernetes с размещением нод в разных 3 подсетях      
-  б. С помощью terraform resource для [kubernetes node group](https://registry.terraform.io/providers/yandex-cloud/yandex/latest/docs/resources/kubernetes_node_group)
-  
-Ожидаемый результат:
+      location {
+        zone      = "${yandex_vpc_subnet.k8s-network-a.zone}"
+        subnet_id = "${yandex_vpc_subnet.k8s-network-a.id}"
+      }
 
-1. Работоспособный Kubernetes кластер.
-2. В файле `~/.kube/config` находятся данные для доступа к кластеру.
-3. Команда `kubectl get pods --all-namespaces` отрабатывает без ошибок.
+      location {
+        zone      = "${yandex_vpc_subnet.k8s-network-b.zone}"
+        subnet_id = "${yandex_vpc_subnet.k8s-network-b.id}"
+      }
 
+      location {
+        zone      = "${yandex_vpc_subnet.k8s-network-c.zone}"
+        subnet_id = "${yandex_vpc_subnet.k8s-network-c.id}"
+      }
+    }
+
+   version   = "1.21"
+    public_ip = true
+
+    maintenance_policy {
+      auto_upgrade = true
+
+      maintenance_window {
+        day        = "monday"
+        start_time = "03:00"
+        duration   = "3h"
+      }
+
+      maintenance_window {
+        day        = "friday"
+        start_time = "02:00"
+        duration   = "4h30m"
+      }
+    }
+  }
+
+  service_account_id      = "${yandex_iam_service_account.k8s.id}"
+  node_service_account_id = "${yandex_iam_service_account.pusher.id}"
+  labels = {
+    my_key       = "my_value"
+    my_other_key = "my_other_value"
+  }
+
+  release_channel = "STABLE"
+  network_policy_provider = "CALICO"
+}
+```
+Создаю воркеры
+#### k8s-nodes.tf
+```resource "yandex_kubernetes_node_group" "mynodes" {
+  cluster_id  = "${yandex_kubernetes_cluster.k8s-yandex.id}"
+  name        = "mynodes"
+  description = "description"
+  version     = "1.21"
+
+  labels = {
+    "key" = "value"
+  }
+
+  instance_template {
+    platform_id = "standard-v2"
+
+    network_interface {
+      nat                = true
+      subnet_ids = [yandex_vpc_subnet.k8s-network-a.id]
+    }
+
+    resources {
+      memory = 4
+      cores  = 2
+    }
+
+    boot_disk {
+      type = "network-hdd"
+      size = 64
+    }
+
+    scheduling_policy {
+      preemptible = false
+    }
+
+  }
+
+  scale_policy {
+    auto_scale {
+      min = 3
+      max = 6
+      initial = 3
+    }
+  }
+
+  allocation_policy {
+    location {
+      zone = "ru-central1-a"
+    }
+  }
+
+  maintenance_policy {
+    auto_upgrade = true
+    auto_repair  = true
+
+    maintenance_window {
+      day        = "monday"
+      start_time = "03:00"
+      duration   = "3h"
+    }
+    maintenance_window {
+      day        = "friday"
+      start_time = "02:00"
+      duration   = "4h30m"
+    }
+  }
+}
+```
+Получаю адрес и id кластера
+#### outputs.tf
+```
+output "cluster_external_v4_endpoint" {
+  value = yandex_kubernetes_cluster.k8s-yandex.master.0.external_v4_endpoint
+}
+
+output "cluster_id" {
+  value = yandex_kubernetes_cluster.k8s-yandex.id
+}
+```
+Создаю конфиг kubernetes
+```bash
+$ yc managed-kubernetes cluster get-credentials --id $(terraform output -json cluster_id | sed 's/\"//g') --external
+
+Context 'yc-k8s-yandex' was added as default to kubeconfig '/home/alexp/.kube/config'.
+Check connection to cluster using 'kubectl cluster-info --kubeconfig /home/alexp/.kube/config'.
+
+Note, that authentication depends on 'yc' and its config profile 'default'.
+To access clusters using the Kubernetes API, please use Kubernetes Service Account.
+```
+![img](img/03.png)
+
+Команда `kubectl get pods --all-namespaces`.
+![img](img/01.png)
 ---
 ### Создание тестового приложения
-
-Для перехода к следующему этапу необходимо подготовить тестовое приложение, эмулирующее основное приложение разрабатываемое вашей компанией.
-
-Способ подготовки:
-
-1. Рекомендуемый вариант:  
-   а. Создайте отдельный git репозиторий с простым nginx конфигом, который будет отдавать статические данные.  
-   б. Подготовьте Dockerfile для создания образа приложения.  
-2. Альтернативный вариант:  
-   а. Используйте любой другой код, главное, чтобы был самостоятельно создан Dockerfile.
-
-Ожидаемый результат:
-
 1. Git репозиторий с тестовым приложением и Dockerfile.
-2. Регистр с собранным docker image. В качестве регистра может быть DockerHub или [Yandex Container Registry](https://cloud.yandex.ru/services/container-registry), созданный также с помощью terraform.
+[nginx](https://github.com/hatsker414/nginx)
 
+2. Регистр с собранным docker image. 
+![img](img/02.png)
 ---
 ### Подготовка cистемы мониторинга и деплой приложения
 
-Уже должны быть готовы конфигурации для автоматического создания облачной инфраструктуры и поднятия Kubernetes кластера.  
-Теперь необходимо подготовить конфигурационные файлы для настройки нашего Kubernetes кластера.
+# Деплою в кластер prometheus-stack
+1. Cтавим helm ```sudo snap install helm --classic```
 
-Цель:
-1. Задеплоить в кластер [prometheus](https://prometheus.io/), [grafana](https://grafana.com/), [alertmanager](https://github.com/prometheus/alertmanager), [экспортер](https://github.com/prometheus/node_exporter) основных метрик Kubernetes.
-2. Задеплоить тестовое приложение, например, [nginx](https://www.nginx.com/) сервер отдающий статическую страницу.
+```bash
+ kubectl create namespace netology
+$ helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+$ helm install --namespace netology stable prometheus-community/kube-prometheus-stack
+```
+![img](img/04.png)
 
-Рекомендуемый способ выполнения:
-1. Воспользовать пакетом [kube-prometheus](https://github.com/prometheus-operator/kube-prometheus), который уже включает в себя [Kubernetes оператор](https://operatorhub.io/) для [grafana](https://grafana.com/), [prometheus](https://prometheus.io/), [alertmanager](https://github.com/prometheus/alertmanager) и [node_exporter](https://github.com/prometheus/node_exporter). При желании можете собрать все эти приложения отдельно.
-2. Для организации конфигурации использовать [qbec](https://qbec.io/), основанный на [jsonnet](https://jsonnet.org/). Обратите внимание на имеющиеся функции для интеграции helm конфигов и [helm charts](https://helm.sh/)
-3. Если на первом этапе вы не воспользовались [Terraform Cloud](https://app.terraform.io/), то задеплойте в кластер [atlantis](https://www.runatlantis.io/) для отслеживания изменений инфраструктуры.
+переключаемся на namespace netology 
+``` kubectl config set-context --current --namespace=netology```
 
-Альтернативный вариант:
-1. Для организации конфигурации можно использовать [helm charts](https://helm.sh/)
+Настраиваю Grafana на LoadBalancer.
+```bash
+$ KUBE_EDITOR="nano" kubectl edit svc stable-grafana
+```
+```yaml
+  selector:
+    app.kubernetes.io/instance: stable
+    app.kubernetes.io/name: grafana
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+```
+Меняю на 
+```yaml
+  selector:
+    app.kubernetes.io/instance: stable
+    app.kubernetes.io/name: grafana
+  sessionAffinity: None
+  type: LoadBalancer
+```
+![img](img/06.png)
+![img](img/05.png)
 
-Ожидаемый результат:
-1. Git репозиторий с конфигурационными файлами для настройки Kubernetes.
-2. Http доступ к web интерфейсу grafana.
-3. Дашборды в grafana отображающие состояние Kubernetes кластера.
-4. Http доступ к тестовому приложению.
+[Grafana admin panel](http://84.252.130.125/d/efa86fd1d0c121a26444b636a3f509a8/kubernetes-compute-resources-cluster?orgId=1&refresh=10s)
+admin
+prom-operator
 
----
+[опубликованое приложение](http://130.193.37.8/)
+
+
 ### Установка и настройка CI/CD
 
-Осталось настроить ci/cd систему для автоматической сборки docker image и деплоя приложения при изменении кода.
+Настраиваю CI/CD GitLab
 
-Цель:
+[Репозиторий](https://gitlab.com/n2818/my_dip/-/tree/main)
 
-1. Автоматическая сборка docker образа при коммите в репозиторий с тестовым приложением.
-2. Автоматический деплой нового docker образа.
+1. Настройка gitlab:
+```bash
+$ kubectl -n kube-system get secrets -o json | \
+> jq -r '.items[] | select(.metadata.name | startswith("gitlab-admin")) | .data.token' | \
+> base64 --decode 
+```
+Устанавливаю переменные:
+![img](img/07.png)
 
-Можно использовать [teamcity](https://www.jetbrains.com/ru-ru/teamcity/), [jenkins](https://www.jenkins.io/) либо [gitlab ci](https://about.gitlab.com/stages-devops-lifecycle/continuous-integration/)
+KUBE_TOKEN - token пользователя terraform  
+KUBE_URL - адрес кластера  
+REGISTRYID - id Container Registry  
+OAUTH - oauth token для авторизации в yc    
 
-Ожидаемый результат:
 
-1. Интерфейс ci/cd сервиса доступен по http.
-2. При любом коммите в репозиторие с тестовым приложением происходит сборка и отправка в регистр Docker образа.
-3. При создании тега (например, v1.0.0) происходит сборка и отправка с соответствующим label в регистр, а также деплой соответствующего Docker образа в кластер Kubernetes.
+Интерфейс ci/cd сервиса доступен по [ссылке](https://gitlab.com/n2818/my_dip)  
+При любом коммите в репозиторие с тестовым приложением происходит сборка и отправка в регистр Docker образа.  
 
----
+
+![img](img/08.png)
+
+![img](img/09.png)
+
 ## Что необходимо для сдачи задания?
 
 1. Репозиторий с конфигурационными файлами Terraform и готовность продемонстрировать создание всех ресурсов с нуля.
@@ -165,3 +651,4 @@
 2. Откладывание выполнения курсового проекта на последний момент.
 3. Ожидание моментального ответа на свой вопрос. Дипломные руководители работающие разработчики, которые занимаются, кроме преподавания, 
   своими проектами. Их время ограничено, поэтому постарайтесь задавать правильные вопросы, чтобы получать быстрые ответы :)
+
