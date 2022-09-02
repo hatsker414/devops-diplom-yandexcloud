@@ -22,7 +22,6 @@
 ---
 ## Этапы выполнения:
 
-
 ### Создание облачной инфраструктуры
 
 Подготавливаю облачную инфраструктуру в ЯО при помощи terraform.
@@ -82,7 +81,7 @@ Switched to workspace "stage".
 ```
 4. Создаю VPC с подсетями в разных зонах доступности.
 #### networks.tf
-# Create ya.cloud VPC
+```# Create ya.cloud VPC
 resource "yandex_vpc_network" "k8s-network" {
   name = "yc-net"
 }
@@ -104,9 +103,10 @@ resource "yandex_vpc_subnet" "k8s-network-c" {
   zone           = "ru-central1-c"
   network_id     = yandex_vpc_network.k8s-network.id
   v4_cidr_blocks = ["192.168.30.0/24"]
-}
-```
-6. Проверяю команду ` `terraform apply` без дополнительных ручных действий.
+}```
+
+5. Проверяю команду terraform apply без дополнительных ручных действий.
+
 ```bash
 $ alexp@lair:~/yandex-cloud-terraform$ terraform apply
 yandex_container_registry.diplom: Refreshing state... [id=crp9g918mgr8c4a0geee]
@@ -531,6 +531,7 @@ Check connection to cluster using 'kubectl cluster-info --kubeconfig /home/alexp
 Note, that authentication depends on 'yc' and its config profile 'default'.
 To access clusters using the Kubernetes API, please use Kubernetes Service Account.
 ```
+
 ![img](img/03.png)
 
 Команда `kubectl get pods --all-namespaces`.
@@ -608,7 +609,6 @@ KUBE_TOKEN - token пользователя terraform
 KUBE_URL - адрес кластера  
 REGISTRYID - id Container Registry  
 OAUTH - oauth token для авторизации в yc    
-
 
 Интерфейс ci/cd сервиса доступен по [ссылке](https://gitlab.com/n2818/my_dip)  
 При любом коммите в репозиторие с тестовым приложением происходит сборка и отправка в регистр Docker образа.  
