@@ -656,8 +656,8 @@ output "registry_id" {
   value       = yandex_container_registry.diplom.id
 }
 ```
-Создаю конфиг kubernetes
-```bash
+####Создаю конфиг kubernetes
+```
 $ yc managed-kubernetes cluster get-credentials --id $(terraform output -json cluster_id | sed 's/\"//g') --external
 
 Context 'yc-k8s-yandex' was added as default to kubeconfig '/home/alexp/.kube/config'.
@@ -681,7 +681,7 @@ To access clusters using the Kubernetes API, please use Kubernetes Service Accou
 ---
 ### Подготовка cистемы мониторинга и деплой приложения
 
-# Деплою в кластер prometheus-stack
+#### Деплою в кластер prometheus-stack
 1. Cтавим helm ```sudo snap install helm --classic```
 
 ```bash
@@ -694,7 +694,7 @@ $ helm install --namespace netology stable prometheus-community/kube-prometheus-
 переключаемся на namespace netology 
 ``` kubectl config set-context --current --namespace=netology```
 
-Настраиваю Grafana на LoadBalancer.
+#### Настраиваю Grafana на LoadBalancer.
 ```bash
 $ KUBE_EDITOR="nano" kubectl edit svc stable-grafana
 ```
@@ -722,7 +722,7 @@ status:
 admin
 prom-operator
 
-Деплоим приложение 
+####Деплоим приложение 
 
 ```kubectl apply -f dep_my_nginx.yaml```
 
@@ -772,7 +772,6 @@ spec:
     k8s-app: my-app
   type: LoadBalancer
 ```
-
 
 [опубликованое приложение](http://51.250.39.170 /)
 
