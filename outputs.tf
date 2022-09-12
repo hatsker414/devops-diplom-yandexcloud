@@ -7,5 +7,5 @@ output "cluster_id" {
 }
 output "registry_id" {
   description = "registry ID"
-  value=yandex_container_registry.diplom.id
+  value       = yandex_container_registry.diplom.id
 }

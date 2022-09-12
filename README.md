@@ -81,36 +81,75 @@ Switched to workspace "stage".
 ```
 4. Создаю VPC с подсетями в разных зонах доступности.
 #### networks.tf
-```# Create ya.cloud VPC
-resource "yandex_vpc_network" "k8s-network" {
+```resource "yandex_vpc_network" "k8s-network" {
   name = "yc-net"
 }
-# Create ya.cloud public subnet
-resource "yandex_vpc_subnet" "k8s-network-a" {
-  name           = "public-a"
-  zone           = "ru-central1-a"
+
+resource "yandex_vpc_subnet" "public" {
+  name           = "public0"
+  zone           = var.zones[0]
   network_id     = yandex_vpc_network.k8s-network.id
-  v4_cidr_blocks = ["192.168.10.0/24"]
+  v4_cidr_blocks = var.public_v4_cidr_blocks[0]
 }
-resource "yandex_vpc_subnet" "k8s-network-b" {
-  name           = "public-b"
-  zone           = "ru-central1-b"
+
+
+resource "yandex_vpc_subnet" "private" {
+  count          = local.private_subnets
+  name           = "private${count.index}"
+  zone           = var.zones[count.index]
   network_id     = yandex_vpc_network.k8s-network.id
-  v4_cidr_blocks = ["192.168.20.0/24"]
+  v4_cidr_blocks = var.private_v4_cidr_blocks[count.index]
+  route_table_id = yandex_vpc_route_table.vpc-1-rt.id
 }
-resource "yandex_vpc_subnet" "k8s-network-c" {
-  name           = "public-c"
-  zone           = "ru-central1-c"
-  network_id     = yandex_vpc_network.k8s-network.id
-  v4_cidr_blocks = ["192.168.30.0/24"]
+
+resource "yandex_compute_instance" "nat-vm" {
+  name        = "nat-instance"
+  platform_id = "standard-v1"
+  zone        = var.zones[0]
+
+  resources {
+    cores         = 2
+    core_fraction = 20 
+    memory        = 2
+  }
+
+  scheduling_policy {
+    # !прерываемая!
+    preemptible = (terraform.workspace == "stage") ? true : false
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = "fd80mrhj8fl2oe87o4e1" # nat-instance-ubuntu
+    }
+  }
+
+  network_interface {
+    subnet_id  = yandex_vpc_subnet.public.id
+    ip_address = "192.168.10.254"
+    nat        = true
+  }
+
 }
+
+resource "yandex_vpc_route_table" "vpc-1-rt" {
+  name       = "nat-gateway"
+  network_id = yandex_vpc_network.k8s-network.id
+
+  static_route {
+    destination_prefix = "0.0.0.0/0"
+    next_hop_address   = yandex_compute_instance.nat-vm.network_interface.0.ip_address
+  }
+}
+
+
 ```
 
 5. Проверяю команду terraform apply без дополнительных ручных действий.
 
-```bash
+```
+
 $ alexp@lair:~/yandex-cloud-terraform$ terraform apply
-yandex_container_registry.diplom: Refreshing state... [id=crp9g918mgr8c4a0geee]
 
 Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the
 following symbols:
@@ -118,11 +157,84 @@ following symbols:
 
 Terraform will perform the following actions:
 
+  # yandex_compute_instance.nat-vm will be created
+  + resource "yandex_compute_instance" "nat-vm" {
+      + created_at                = (known after apply)
+      + folder_id                 = (known after apply)
+      + fqdn                      = (known after apply)
+      + hostname                  = (known after apply)
+      + id                        = (known after apply)
+      + name                      = "nat-instance"
+      + network_acceleration_type = "standard"
+      + platform_id               = "standard-v1"
+      + service_account_id        = (known after apply)
+      + status                    = (known after apply)
+      + zone                      = "ru-central1-a"
+
+      + boot_disk {
+          + auto_delete = true
+          + device_name = (known after apply)
+          + disk_id     = (known after apply)
+          + mode        = (known after apply)
+
+          + initialize_params {
+              + block_size  = (known after apply)
+              + description = (known after apply)
+              + image_id    = "fd80mrhj8fl2oe87o4e1"
+              + name        = (known after apply)
+              + size        = (known after apply)
+              + snapshot_id = (known after apply)
+              + type        = "network-hdd"
+            }
+        }
+
+      + network_interface {
+          + index              = (known after apply)
+          + ip_address         = "192.168.10.254"
+          + ipv4               = true
+          + ipv6               = (known after apply)
+          + ipv6_address       = (known after apply)
+          + mac_address        = (known after apply)
+          + nat                = true
+          + nat_ip_address     = (known after apply)
+          + nat_ip_version     = (known after apply)
+          + security_group_ids = (known after apply)
+          + subnet_id          = (known after apply)
+        }
+
+      + placement_policy {
+          + host_affinity_rules = (known after apply)
+          + placement_group_id  = (known after apply)
+        }
+
+      + resources {
+          + core_fraction = 20
+          + cores         = 2
+          + memory        = 2
+        }
+
+      + scheduling_policy {
+          + preemptible = false
+        }
+    }
+
+  # yandex_container_registry.diplom will be created
+  + resource "yandex_container_registry" "diplom" {
+      + created_at = (known after apply)
+      + folder_id  = "b1glh44698ke0dcg2atn"
+      + id         = (known after apply)
+      + labels     = {
+          + "my-label" = "diplom-app"
+        }
+      + name       = "devops-9"
+      + status     = (known after apply)
+    }
+
   # yandex_container_registry_iam_binding.pusher will be created
   + resource "yandex_container_registry_iam_binding" "pusher" {
       + id          = (known after apply)
       + members     = (known after apply)
-      + registry_id = "crp9g918mgr8c4a0geee"
+      + registry_id = (known after apply)
       + role        = "editor"
     }
 
@@ -147,7 +259,7 @@ Terraform will perform the following actions:
       + cluster_ipv4_range       = (known after apply)
       + cluster_ipv6_range       = (known after apply)
       + created_at               = (known after apply)
-      + description              = "description"
+      + description              = "k8s cluster"
       + folder_id                = (known after apply)
       + health                   = (known after apply)
       + id                       = (known after apply)
@@ -188,45 +300,37 @@ Terraform will perform the following actions:
               + maintenance_window {
                   + day        = "monday"
                   + duration   = "3h"
-                  + start_time = "03:00"
+                  + start_time = "01:00"
                 }
             }
 
           + regional {
-              + region = "ru-central1"
+              + region = (known after apply)
 
               + location {
                   + subnet_id = (known after apply)
-                  + zone      = "ru-central1-a"
-                }
-              + location {
-                  + subnet_id = (known after apply)
-                  + zone      = "ru-central1-b"
-                }
-              + location {
-                  + subnet_id = (known after apply)
-                  + zone      = "ru-central1-c"
+                  + zone      = (known after apply)
                 }
             }
 
           + zonal {
               + subnet_id = (known after apply)
-              + zone      = (known after apply)
+              + zone      = "ru-central1-a"
             }
         }
     }
 
-  # yandex_kubernetes_node_group.mynodes will be created
-  + resource "yandex_kubernetes_node_group" "mynodes" {
+  # yandex_kubernetes_node_group.node_group1 will be created
+  + resource "yandex_kubernetes_node_group" "node_group1" {
       + cluster_id        = (known after apply)
       + created_at        = (known after apply)
-      + description       = "description"
+      + description       = "worker nodes"
       + id                = (known after apply)
       + instance_group_id = (known after apply)
       + labels            = {
           + "key" = "value"
         }
-      + name              = "mynodes"
+      + name              = "node-group1"
       + status            = (known after apply)
       + version           = "1.21"
       + version_info      = (known after apply)
@@ -235,6 +339,14 @@ Terraform will perform the following actions:
           + location {
               + subnet_id = (known after apply)
               + zone      = "ru-central1-a"
+            }
+          + location {
+              + subnet_id = (known after apply)
+              + zone      = "ru-central1-b"
+            }
+          + location {
+              + subnet_id = (known after apply)
+              + zone      = "ru-central1-c"
             }
         }
 
@@ -247,10 +359,10 @@ Terraform will perform the following actions:
           + metadata                  = (known after apply)
           + nat                       = (known after apply)
           + network_acceleration_type = (known after apply)
-          + platform_id               = "standard-v2"
+          + platform_id               = "standard-v1"
 
           + boot_disk {
-              + size = 64
+              + size = 100
               + type = "network-hdd"
             }
 
@@ -261,19 +373,19 @@ Terraform will perform the following actions:
           + network_interface {
               + ipv4       = true
               + ipv6       = (known after apply)
-              + nat        = true
+              + nat        = false
               + subnet_ids = (known after apply)
             }
 
           + resources {
-              + core_fraction = (known after apply)
+              + core_fraction = 5
               + cores         = 2
               + gpus          = 0
-              + memory        = 4
+              + memory        = 2
             }
 
           + scheduling_policy {
-              + preemptible = false
+              + preemptible = (known after apply)
             }
         }
 
@@ -284,20 +396,19 @@ Terraform will perform the following actions:
           + maintenance_window {
               + day        = "friday"
               + duration   = "4h30m"
-              + start_time = "02:00"
+              + start_time = "1:00"
             }
           + maintenance_window {
               + day        = "monday"
               + duration   = "3h"
-              + start_time = "03:00"
+              + start_time = "5:00"
             }
         }
 
       + scale_policy {
-          + auto_scale {
-              + initial = 3
-              + max     = 6
-              + min     = 3
+
+          + fixed_scale {
+              + size = 3
             }
         }
     }
@@ -321,13 +432,76 @@ Terraform will perform the following actions:
       + subnet_ids                = (known after apply)
     }
 
-  # yandex_vpc_subnet.k8s-network-a will be created
-  + resource "yandex_vpc_subnet" "k8s-network-a" {
+  # yandex_vpc_route_table.vpc-1-rt will be created
+  + resource "yandex_vpc_route_table" "vpc-1-rt" {
+      + created_at = (known after apply)
+      + folder_id  = (known after apply)
+      + id         = (known after apply)
+      + labels     = (known after apply)
+      + name       = "nat-gateway"
+      + network_id = (known after apply)
+
+      + static_route {
+          + destination_prefix = "0.0.0.0/0"
+          + next_hop_address   = "192.168.10.254"
+        }
+    }
+
+  # yandex_vpc_subnet.private[0] will be created
+  + resource "yandex_vpc_subnet" "private" {
       + created_at     = (known after apply)
       + folder_id      = (known after apply)
       + id             = (known after apply)
       + labels         = (known after apply)
-      + name           = "public-a"
+      + name           = "private0"
+      + network_id     = (known after apply)
+      + route_table_id = (known after apply)
+      + v4_cidr_blocks = [
+          + "192.168.20.0/24",
+        ]
+      + v6_cidr_blocks = (known after apply)
+      + zone           = "ru-central1-a"
+    }
+
+  # yandex_vpc_subnet.private[1] will be created
+  + resource "yandex_vpc_subnet" "private" {
+      + created_at     = (known after apply)
+      + folder_id      = (known after apply)
+      + id             = (known after apply)
+      + labels         = (known after apply)
+      + name           = "private1"
+      + network_id     = (known after apply)
+      + route_table_id = (known after apply)
+      + v4_cidr_blocks = [
+          + "192.168.40.0/24",
+        ]
+      + v6_cidr_blocks = (known after apply)
+      + zone           = "ru-central1-b"
+    }
+
+  # yandex_vpc_subnet.private[2] will be created
+  + resource "yandex_vpc_subnet" "private" {
+      + created_at     = (known after apply)
+      + folder_id      = (known after apply)
+      + id             = (known after apply)
+      + labels         = (known after apply)
+      + name           = "private2"
+      + network_id     = (known after apply)
+      + route_table_id = (known after apply)
+      + v4_cidr_blocks = [
+          + "192.168.60.0/24",
+        ]
+      + v6_cidr_blocks = (known after apply)
+      + zone           = "ru-central1-c"
+    }
+
+  # yandex_vpc_subnet.public will be created
+  + resource "yandex_vpc_subnet" "public" {
+      + created_at     = (known after apply)
+      + folder_id      = (known after apply)
+      + id             = (known after apply)
+      + labels         = (known after apply)
+      + name           = "public0"
       + network_id     = (known after apply)
       + v4_cidr_blocks = [
           + "192.168.10.0/24",
@@ -336,48 +510,14 @@ Terraform will perform the following actions:
       + zone           = "ru-central1-a"
     }
 
-  # yandex_vpc_subnet.k8s-network-b will be created
-  + resource "yandex_vpc_subnet" "k8s-network-b" {
-      + created_at     = (known after apply)
-      + folder_id      = (known after apply)
-      + id             = (known after apply)
-      + labels         = (known after apply)
-      + name           = "public-b"
-      + network_id     = (known after apply)
-      + v4_cidr_blocks = [
-          + "192.168.20.0/24",
-        ]
-      + v6_cidr_blocks = (known after apply)
-      + zone           = "ru-central1-b"
-    }
-
-  # yandex_vpc_subnet.k8s-network-c will be created
-  + resource "yandex_vpc_subnet" "k8s-network-c" {
-      + created_at     = (known after apply)
-      + folder_id      = (known after apply)
-      + id             = (known after apply)
-      + labels         = (known after apply)
-      + name           = "public-c"
-      + network_id     = (known after apply)
-      + v4_cidr_blocks = [
-          + "192.168.30.0/24",
-        ]
-      + v6_cidr_blocks = (known after apply)
-      + zone           = "ru-central1-c"
-    }
-
-Plan: 10 to add, 0 to change, 0 to destroy.
+Plan: 14 to add, 0 to change, 0 to destroy.
 
 Changes to Outputs:
   + cluster_external_v4_endpoint = (known after apply)
   + cluster_id                   = (known after apply)
-  + registry_id                  = "crp9g918mgr8c4a0geee"
-  Changes to Outputs:
-  + cluster_external_v4_endpoint = (known after apply)
-  + cluster_id                   = (known after apply)
-  + registry_id                  = "crp9g918mgr8c4a0geee"
+  + registry_id                  = (known after apply)
 
-Do you want to perform these actions in workspace "stage"?
+Do you want to perform these actions?
   Terraform will perform the actions described above.
   Only 'yes' will be accepted to approve.
 
@@ -386,42 +526,29 @@ Do you want to perform these actions in workspace "stage"?
 ---
 ### Создание Kubernetes кластера
 Cоздаю Kubernetes кластер на базе предварительно созданной инфраструктуры используя Yandex Managed Service for Kubernetes
-#### k8s-cluster.tf
-```resource "yandex_kubernetes_cluster" "k8s-yandex" {
+#### cluster.tf
+```
+resource "yandex_kubernetes_cluster" "k8s-yandex" {
   name        = "k8s-yandex"
-  description = "description"
+  description = "k8s cluster"
 
-  network_id = "${yandex_vpc_network.k8s-network.id}"
+  network_id = yandex_vpc_network.k8s-network.id
 
   master {
-    regional {
-      region = "ru-central1"
-
-      location {
-        zone      = "${yandex_vpc_subnet.k8s-network-a.zone}"
-        subnet_id = "${yandex_vpc_subnet.k8s-network-a.id}"
-      }
-
-      location {
-        zone      = "${yandex_vpc_subnet.k8s-network-b.zone}"
-        subnet_id = "${yandex_vpc_subnet.k8s-network-b.id}"
-      }
-
-      location {
-        zone      = "${yandex_vpc_subnet.k8s-network-c.zone}"
-        subnet_id = "${yandex_vpc_subnet.k8s-network-c.id}"
-      }
-    }
-
-   version   = "1.21"
+    version   = "1.21"
     public_ip = true
+
+    zonal {
+      zone      = var.zones[0]
+      subnet_id = yandex_vpc_subnet.private[0].id
+    }
 
     maintenance_policy {
       auto_upgrade = true
 
       maintenance_window {
         day        = "monday"
-        start_time = "03:00"
+        start_time = "01:00"
         duration   = "3h"
       }
 
@@ -446,10 +573,11 @@ Cоздаю Kubernetes кластер на базе предварительно
 ```
 Создаю воркеры
 #### k8s-nodes.tf
-```resource "yandex_kubernetes_node_group" "mynodes" {
-  cluster_id  = "${yandex_kubernetes_cluster.k8s-yandex.id}"
-  name        = "mynodes"
-  description = "description"
+```
+resource "yandex_kubernetes_node_group" "node_group1" {
+  cluster_id  = yandex_kubernetes_cluster.k8s-yandex.id
+  name        = "node-group1"
+  description = "worker nodes"
   version     = "1.21"
 
   labels = {
@@ -457,40 +585,41 @@ Cоздаю Kubernetes кластер на базе предварительно
   }
 
   instance_template {
-    platform_id = "standard-v2"
+    platform_id = "standard-v1"
 
     network_interface {
-      nat                = true
-      subnet_ids = [yandex_vpc_subnet.k8s-network-a.id]
+      nat = false # Provide a public address, for instance, to access the internet over NAT
+      subnet_ids = [yandex_vpc_subnet.private[0].id, yandex_vpc_subnet.private[1].id, yandex_vpc_subnet.private[2].id]
     }
 
     resources {
-      memory = 4
-      cores  = 2
+      memory        = 2
+      cores         = 2
+      core_fraction = 5 
     }
 
     boot_disk {
       type = "network-hdd"
-      size = 64
-    }
-
-    scheduling_policy {
-      preemptible = false
+      size = 100
     }
 
   }
 
   scale_policy {
-    auto_scale {
-      min = 3
-      max = 6
-      initial = 3
+    fixed_scale {
+      size = 3
     }
   }
 
   allocation_policy {
     location {
-      zone = "ru-central1-a"
+      zone = var.zones[0]
+    }
+    location {
+      zone = var.zones[1]
+    }
+    location {
+      zone = var.zones[2]
     }
   }
 
@@ -500,12 +629,13 @@ Cоздаю Kubernetes кластер на базе предварительно
 
     maintenance_window {
       day        = "monday"
-      start_time = "03:00"
+      start_time = "5:00"
       duration   = "3h"
     }
+
     maintenance_window {
       day        = "friday"
-      start_time = "02:00"
+      start_time = "1:00"
       duration   = "4h30m"
     }
   }
@@ -520,6 +650,10 @@ output "cluster_external_v4_endpoint" {
 
 output "cluster_id" {
   value = yandex_kubernetes_cluster.k8s-yandex.id
+}
+output "registry_id" {
+  description = "registry ID"
+  value       = yandex_container_registry.diplom.id
 }
 ```
 Создаю конфиг kubernetes
@@ -584,11 +718,63 @@ status:
 ![img](img/06.png)
 ![img](img/05.png)
 
-[Grafana admin panel](http://84.252.130.125/d/efa86fd1d0c121a26444b636a3f509a8/kubernetes-compute-resources-cluster?orgId=1&refresh=10s)
+[Grafana admin panel](http://130.193.39.182/d/efa86fd1d0c121a26444b636a3f509a8/kubernetes-compute-resources-cluster?orgId=1&refresh=10s)
 admin
 prom-operator
 
-[опубликованое приложение](http://130.193.37.8/)
+Деплоим приложение 
+
+```kubectl apply -f dep_my_nginx.yaml```
+
+```commandline
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netology
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: my-app
+  namespace: netology
+  labels:
+    k8s-app: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      k8s-app: my-app
+  template:
+    metadata:
+      name: my-app
+      labels:
+        k8s-app: my-app
+    spec:
+      containers:
+      - name: my-nginx
+        image: cr.yandex/crp8kad42eejq4kdj862/my_nginx:1.01
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx-my
+  namespace: netology
+  labels:
+    k8s-app: my-app
+spec:
+  ports:
+  - protocol: TCP
+    port: 80
+  selector:
+    k8s-app: my-app
+  type: LoadBalancer
+```
+
+
+[опубликованое приложение](http://51.250.39.170 /)
 
 
 ### Установка и настройка CI/CD

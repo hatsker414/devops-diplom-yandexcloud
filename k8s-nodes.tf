@@ -1,7 +1,7 @@
-resource "yandex_kubernetes_node_group" "mynodes" {
-  cluster_id  = "${yandex_kubernetes_cluster.k8s-yandex.id}"
-  name        = "mynodes"
-  description = "description"
+resource "yandex_kubernetes_node_group" "node_group1" {
+  cluster_id  = yandex_kubernetes_cluster.k8s-yandex.id
+  name        = "node-group1"
+  description = "worker nodes"
   version     = "1.21"
 
   labels = {
@@ -9,40 +9,41 @@ resource "yandex_kubernetes_node_group" "mynodes" {
   }
 
   instance_template {
-    platform_id = "standard-v2"
+    platform_id = "standard-v1"
 
     network_interface {
-      nat                = true
-      subnet_ids = [yandex_vpc_subnet.k8s-network-a.id]
+      nat = false # Provide a public address, for instance, to access the internet over NAT
+      subnet_ids = [yandex_vpc_subnet.private[0].id, yandex_vpc_subnet.private[1].id, yandex_vpc_subnet.private[2].id]
     }
 
     resources {
-      memory = 4
-      cores  = 2
+      memory        = 2
+      cores         = 2
+      core_fraction = 5
     }
 
     boot_disk {
       type = "network-hdd"
-      size = 64
-    }
-
-    scheduling_policy {
-      preemptible = false
+      size = 100
     }
 
   }
 
   scale_policy {
-    auto_scale {
-      min = 3
-      max = 6
-      initial = 3
+    fixed_scale {
+      size = 3
     }
   }
 
   allocation_policy {
     location {
-      zone = "ru-central1-a"
+      zone = var.zones[0]
+    }
+    location {
+      zone = var.zones[1]
+    }
+    location {
+      zone = var.zones[2]
     }
   }
 
@@ -52,12 +53,13 @@ resource "yandex_kubernetes_node_group" "mynodes" {
 
     maintenance_window {
       day        = "monday"
-      start_time = "03:00"
+      start_time = "5:00"
       duration   = "3h"
     }
+
     maintenance_window {
       day        = "friday"
-      start_time = "02:00"
+      start_time = "1:00"
       duration   = "4h30m"
     }
   }
